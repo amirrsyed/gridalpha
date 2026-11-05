@@ -20,7 +20,7 @@ sim:
 ercot:
   # Real-data adapter (gridalpha/data/ercot.py). Needs network access to ERCOT's API,
   # so it runs in GitHub Actions or Modal, not in a locked-down sandbox.
-  start: "2021-06-01"
+  start: "2024-06-01"
   location_types: ["Resource Node", "Load Zone", "Trading Hub"]
   max_nodes: 1000
   topology: tamu_activsg2000   # synthetic grid used for physical edges + physics loss
