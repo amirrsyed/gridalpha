@@ -1,6 +1,6 @@
 # Gate thresholds and trading limits change only with the owner's review.
 # Replace @OWNER with your GitHub username and enable "Require review from Code Owners"
 # in the branch protection rule for main.
-/config/gates.yaml        @OWNER
-/config/default.yaml      @OWNER
-/.github/                 @OWNER
+/config/gates.yaml        @amirrsyed
+/config/default.yaml      @amirrsyed
+/.github/                 @amirrsyed
