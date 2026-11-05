@@ -1,0 +1,6 @@
+# Mechanics-only gates for the CI smoke run (tiny data, 2-epoch models).
+# CI checks that every stage runs and that no look-ahead leak exists; model-quality
+# gates are enforced on real runs with config/gates.yaml.
+validate:
+  max_missing_frac: 0.01
+  leak_test_must_pass: true

@@ -1,0 +1,24 @@
+{
+  "name": "gridalpha-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:artifact": "vite build --mode artifact"
+  },
+  "dependencies": {
+    "@blueprintjs/core": "6.21.0",
+    "@blueprintjs/icons": "6.14.1",
+    "@blueprintjs/table": "6.3.0",
+    "echarts": "5.6.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.3.4",
+    "vite": "6.3.5",
+    "vite-plugin-singlefile": "2.3.0"
+  }
+}

@@ -1,0 +1,23 @@
+# Fast smoke profile for CI on every pull request: tiny sim, tiny model, all stages.
+sim:
+  start: "2025-06-01"
+  end: "2025-10-31"
+  workers: 2
+walk_forward:
+  test_days: 40
+  folds: 2
+  val_days: 20
+model:
+  hidden: 24
+  layers: 2
+train:
+  epochs: 2
+  patience: 2
+  ensemble_seeds: [11, 22]
+pretrain:
+  epochs: 1
+trade:
+  samples: 400
+project:
+  artifacts_dir: artifacts_ci
+  state_file: state/pipeline_ci.json

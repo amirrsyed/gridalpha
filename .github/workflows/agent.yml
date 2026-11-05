@@ -1,0 +1,36 @@
+# The AI engineer: Claude Code picks up issues labeled `claude` (the autopilot opens these
+# when a stage fails or a gate misses) and @claude mentions, then proposes a fix as a PR.
+# CI verifies the PR on the simulator; gate thresholds and trading limits are owner-protected
+# (CODEOWNERS + branch protection), so the agent cannot pass a gate by loosening it.
+name: ai-engineer
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+jobs:
+  claude:
+    if: >
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          label_trigger: claude
+          claude_args: >-
+            --max-turns 40
+            --append-system-prompt "You maintain GridAlpha. Read CLAUDE.md first. Never edit config/gates.yaml or the trade section of config/default.yaml.
+            Verify every change with: GRIDALPHA_GATES=config/gates_ci.yaml python -m gridalpha.cli run --profile ci and python -m pytest -q."

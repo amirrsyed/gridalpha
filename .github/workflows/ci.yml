@@ -1,0 +1,36 @@
+# Every push and PR: unit tests, the full autopilot on a tiny simulated market, and a dashboard build.
+# This is also how pull requests from the Claude Code agent are verified before merge.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest -q
+      - name: Autopilot smoke run (simulated market, mechanics-only gates)
+        env:
+          GRIDALPHA_GATES: config/gates_ci.yaml
+        run: python -m gridalpha.cli run --profile ci
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Build dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          cp ../artifacts_ci/site/signals.json public/signals.json
+          npm run build

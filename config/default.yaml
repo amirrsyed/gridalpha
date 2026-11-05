@@ -1,0 +1,102 @@
+# GridAlpha default configuration.
+# Every stage of the autopilot reads this file; override per run with --set key=value.
+
+project:
+  name: gridalpha
+  data_source: sim          # sim | ercot
+  artifacts_dir: artifacts
+  state_file: state/pipeline.json
+  seed: 7
+
+sim:
+  start: "2023-10-01"
+  end: "2026-11-06"         # last operating day = the "tomorrow" the live signal is for
+  n_buses: 48
+  workers: 2                # parallel processes for the OPF solves
+  voll: 5000.0              # $/MWh, load-shed price (ERCOT-style cap)
+  gas_start: 2.8            # $/MMBtu
+  data_center_growth: true
+
+ercot:
+  # Real-data adapter (gridalpha/data/ercot.py). Needs network access to ERCOT's API,
+  # so it runs in GitHub Actions or Modal, not in a locked-down sandbox.
+  start: "2021-06-01"
+  location_types: ["Resource Node", "Load Zone", "Trading Hub"]
+  max_nodes: 1000
+  topology: tamu_activsg2000   # synthetic grid used for physical edges + physics loss
+
+features:
+  history_days: 7            # lagged realized data; latest full day available at bid time is D-2
+  history_lag_days: 2
+  bind_freq_window: 30
+
+model:
+  hidden: 64
+  layers: 3
+  node_emb: 16
+  adaptive_topk: 8
+  quantiles: [0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98]
+  dropout: 0.1
+  relations: [physical, adaptive, global]
+
+loss:
+  w_quantile: 1.0
+  w_da_level: 0.2
+  w_rt_cong: 0.2
+  w_bind: 0.3
+  w_phys_balance: 0.05
+  w_phys_limit: 0.05
+  w_phys_inj: 0.05          # supervised injections; only where labels exist (sim)
+  target_scale: 10.0        # $/MWh; spreads are divided by this before the loss
+  target_transform: asinh   # learn quantiles of asinh(spread/scale); exact for quantiles, tames $5,000 spikes
+
+pretrain:
+  epochs: 12
+  mask_frac: 0.3
+  batch_hours: 256
+  lr: 0.002
+
+train:
+  epochs: 40
+  patience: 6
+  batch_days: 8
+  lr: 0.0015
+  weight_decay: 0.0001
+  ensemble_seeds: [11, 22, 33, 44, 55]
+  device: auto              # auto | cpu | cuda
+
+walk_forward:
+  test_days: 365            # last N operating days are out-of-sample
+  folds: 4                  # retrain points inside the test window (expanding window)
+  val_days: 60              # tail of each training window: early stopping + conformal calibration
+  purge_days: 7
+
+calibrate:
+  method: conformal_quantile_shift
+
+trade:
+  cost_per_mwh: 1.0         # fees + uplift, $/MWh
+  min_edge: 2.0             # $/MWh above costs before a ticket is issued
+  min_p_profit: 0.55
+  capital: 250000.0         # $ bankroll for the backtest
+  compound: false           # fixed bankroll: compare models on the same stake every day
+  risk_per_mwh: 50.0        # C: capital at risk per MWh in the Kelly formula
+  kelly_fraction: 0.25
+  max_mw_node_hour: 25.0
+  max_mw_zone_hour: 75.0
+  max_daily_var95: 0.02     # share of capital
+  samples: 2000
+  hour_corr_decay: 0.6
+  max_tickets_per_day: 60
+
+compute:
+  backend: local            # local | modal | digitalocean
+  monthly_budget_usd: 60.0
+  modal:
+    gpu: A10G
+    timeout_min: 120
+    est_usd_per_hour: 1.10
+  digitalocean:
+    size: gpu-4000adax1-20gb
+    region: tor1
+    est_usd_per_hour: 0.76

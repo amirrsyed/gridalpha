@@ -1,0 +1,22 @@
+# Pass/fail gates checked by the autopilot after each stage.
+# Owner-protected (see .github/CODEOWNERS): the AI engineer may not loosen these.
+
+validate:
+  max_missing_frac: 0.01          # share of node-hours missing after cleaning
+  leak_test_must_pass: true       # features for day D use nothing published after D-1 10:00
+
+baselines:
+  lgbm_beats_naive_pinball: true  # LightGBM median pinball < naive pinball
+  lgbm_net_pnl_positive: false    # informative only; the GNN gate is the hard one
+
+train:
+  gnn_beats_lgbm_pinball: true
+  min_pinball_improvement: 0.02   # GNN pinball at least 2% better than LightGBM
+
+calibrate:
+  coverage_tolerance: 0.05        # empirical coverage of the 10-90 band within +/-5 points of 80%
+
+backtest:
+  min_sharpe: 1.0                 # annualized, daily P&L, kelly_fraction from default.yaml
+  max_drawdown: 0.25              # share of peak capital
+  gnn_pnl_beats_lgbm: true

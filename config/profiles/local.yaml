@@ -1,0 +1,10 @@
+# Reduced profile for a 2-core laptop / sandbox CPU. Same code path, smaller budget.
+# The full profile (default.yaml) is meant for cloud GPUs (compute.backend: modal).
+model:
+  hidden: 48
+train:
+  epochs: 14
+  patience: 4
+  ensemble_seeds: [11, 22]
+pretrain:
+  epochs: 4

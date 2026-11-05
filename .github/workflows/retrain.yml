@@ -1,0 +1,47 @@
+# Weekly (and on demand): full walk-forward retrain on cloud GPUs through Modal.
+# The autopilot fans fold x seed jobs out in parallel, checks every gate, and opens an
+# issue for the Claude Code agent if anything fails. Budget is enforced in config.
+name: retrain
+on:
+  schedule:
+    - cron: "0 6 * * 0"        # Sundays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      from_stage:
+        description: "Redo from this stage (default: features)"
+        default: features
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: gridalpha-retrain
+  cancel-in-progress: false
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      ERCOT_API_USERNAME: ${{ secrets.ERCOT_API_USERNAME }}
+      ERCOT_API_PASSWORD: ${{ secrets.ERCOT_API_PASSWORD }}
+      ERCOT_PUBLIC_API_SUBSCRIPTION_KEY: ${{ secrets.ERCOT_PUBLIC_API_SUBSCRIPTION_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Deploy the Modal app (GPU functions)
+        run: modal deploy -m gridalpha.cloud.modal_app
+      - name: Restore state from the Modal volume
+        run: python -m gridalpha.cloud.sync pull
+      - name: Autopilot (cloud GPUs)
+        run: >
+          python -m gridalpha.cli run --from ${{ github.event.inputs.from_stage || 'features' }}
+          --set project.data_source=ercot --set compute.backend=modal
+      - name: Save state
+        if: always()
+        run: python -m gridalpha.cloud.sync push
