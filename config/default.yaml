@@ -22,7 +22,7 @@ ercot:
   # so it runs in GitHub Actions or Modal, not in a locked-down sandbox.
   start: "2024-06-01"
   location_types: ["Resource Node", "Load Zone", "Trading Hub"]
-  max_nodes: 1000
+  max_nodes: 300             # settlement points in the graph; raise once the first real run works
   topology: tamu_activsg2000   # synthetic grid used for physical edges + physics loss
 
 features:

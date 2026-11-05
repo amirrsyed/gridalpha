@@ -1,5 +1,6 @@
 # Daily: pull fresh ERCOT data, produce tomorrow's tickets with the current models, publish the dashboard.
 # Runs at 13:35 UTC (07:35 CST / 08:35 CDT), well before the 10:00 CT day-ahead bid deadline.
+# Until a retrain has passed every gate, it exits early with a notice and publishes nothing.
 name: daily-signals
 on:
   schedule:
@@ -16,7 +17,9 @@ concurrency:
 jobs:
   signals:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    outputs:
+      ready: ${{ steps.daily.outputs.ready }}
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
@@ -34,23 +37,28 @@ jobs:
       - name: Restore models, data cache and pipeline state from the Modal volume
         run: python -m gridalpha.cloud.sync pull
       - name: Ingest, validate, features, tickets, export
+        id: daily
         run: python -m gridalpha.cli daily --set project.data_source=ercot
       - name: Save artifacts back to the volume
-        if: always()
+        if: always() && steps.daily.outputs.ready == 'true'
         run: python -m gridalpha.cloud.sync push
       - uses: actions/setup-node@v4
+        if: steps.daily.outputs.ready == 'true'
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
       - name: Build dashboard
+        if: steps.daily.outputs.ready == 'true'
         working-directory: dashboard
         run: npm ci && npm run build
       - uses: actions/upload-pages-artifact@v3
+        if: steps.daily.outputs.ready == 'true'
         with:
           path: dashboard/dist
   deploy:
     needs: signals
+    if: needs.signals.outputs.ready == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

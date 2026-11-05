@@ -8,10 +8,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .autopilot import STAGES, Autopilot
 from .config import load_config
+
+
+def _gh_output(key: str, value: str):
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a") as fh:
+            fh.write(f"{key}={value}\n")
+
+
+def models_ready(ap) -> tuple[bool, str]:
+    """Daily tickets need a retrain whose train, calibrate and backtest gates all passed."""
+    st = ap.state["stages"]
+    for s in ["train", "calibrate", "backtest"]:
+        if st.get(s, {}).get("status") != "passed":
+            return False, f"the last retrain's {s} stage is '{st.get(s, {}).get('status', 'pending')}'"
+    k = ap.cfg["walk_forward"]["folds"] - 1
+    missing = [s for s in ap.cfg["train"]["ensemble_seeds"]
+               if not (ap.A / "models" / f"gnn_fold{k}_seed{s}.pt").exists()]
+    if missing:
+        return False, f"model checkpoints for seeds {missing} are missing"
+    return True, ""
 
 
 def main(argv=None):
@@ -33,6 +55,11 @@ def main(argv=None):
             print(f"{s:10s} {st.get('status', 'pending'):12s} {st.get('ended', '')}  {st.get('error') or ''}")
         return 0
     if a.command == "daily":
+        ready, why = models_ready(ap)
+        _gh_output("ready", "true" if ready else "false")
+        if not ready:
+            print(f"::notice::No tickets today: {why}. Run the retrain workflow first.")
+            return 0
         for s in ["ingest", "validate", "features", "signals", "publish"]:
             ap.state["stages"][s] = {"status": "pending"}
         ok = all(ap.run(only=s) for s in ["ingest", "validate", "features", "signals", "publish"])

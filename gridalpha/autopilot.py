@@ -178,7 +178,8 @@ class Autopilot:
                 "or trading limits. Run `python -m gridalpha.cli run --profile ci` to verify before opening the PR.")
         alert = self.root / "state" / "ALERT.md"
         alert.write_text(f"# Autopilot alert ({_now()})\n\n{body}\n")
-        if os.environ.get("GITHUB_ACTIONS") == "true" and shutil.which("gh"):
+        if (os.environ.get("GITHUB_ACTIONS") == "true" and shutil.which("gh") and os.environ.get("GH_TOKEN")
+                and not os.environ.get("GRIDALPHA_NO_ISSUES")):
             title = f"[autopilot] {name}: {st['status']}"
             try:
                 subprocess.run(["gh", "issue", "create", "--title", title, "--body", body, "--label", "autopilot",
@@ -236,7 +237,8 @@ class Autopilot:
             fetch(self.cfg, raw, log=self.log)
         meta = self.meta()
         return {"days": len(meta["dates"]), "first": meta["dates"][0], "last": meta["dates"][-1],
-                "nodes": len(meta["grid"]["nodes"]), "lines": len(meta["grid"]["lines"]), "source": meta["source"]}
+                "nodes": len(meta["grid"]["nodes"]), "lines": len(meta["grid"]["lines"]), "source": meta["source"],
+                "coverage": meta.get("coverage")}
 
     def stage_validate(self) -> dict:
         from .data.build import leak_test, load_raw

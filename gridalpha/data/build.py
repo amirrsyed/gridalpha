@@ -171,6 +171,9 @@ def build_features(raw: dict, meta: dict, cfg: dict) -> dict:
         labels["y_inj"] = raw["rt_inj"].astype(np.float32)
 
     lines = np.array([[ln["from"], ln["to"]] for ln in meta["grid"]["lines"]], dtype=np.int64)
+    # real data has gaps (tomorrow's prices, retired nodes, missing forecasts): inputs are zero-filled,
+    # labels stay NaN and are masked out of every loss and metric
+    node, glob, hist, edge = (np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0) for a in (node, glob, hist, edge))
     return {
         "node": node, "glob": glob, "hist": hist, "edge": edge, **labels,
         "lines": lines, "first_day": np.array(first), "dates": np.array(meta["dates"]),
