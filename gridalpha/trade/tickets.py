@@ -52,12 +52,23 @@ def size_day(q: np.ndarray, da_hat: np.ndarray, members_med: np.ndarray | None, 
     taus = np.asarray(cfg["model"]["quantiles"])
     H, N, Q = q.shape
     mid = list(taus).index(0.5)
-    med = q[..., mid]
-    side = np.where(med >= 0, 1, -1)                              # +1 DEC, -1 INC
     # quick screen with a small independent sample per node-hour
     u = rng.random((400, H * N))
-    Xs = sample_from_quantiles(q.reshape(-1, Q), taus, u) * side.reshape(-1)[None, :] - tc["cost_per_mwh"]
-    mean_edge = Xs.mean(0)
+    S = sample_from_quantiles(q.reshape(-1, Q), taus, u)
+    if tc.get("edge_estimator", "mean") == "body":
+        # direction and edge from the body of the forecast, where it is stable; the extreme tails are
+        # learned from rare spikes and are noisy, so they only shrink or block positions via Kelly + risk caps
+        lo, hi = tc.get("body_quantiles", [0.05, 0.95])
+        qq = q.reshape(-1, Q)
+        body = np.clip(S, qq[:, list(taus).index(lo)],
+                       qq[:, list(taus).index(hi)]).mean(0)
+        side = np.where(body >= 0, 1, -1).reshape(H, N)
+        Xs = S * side.reshape(-1)[None, :] - tc["cost_per_mwh"]
+        mean_edge = body * side.reshape(-1) - tc["cost_per_mwh"]
+    else:
+        side = np.where(q[..., mid] >= 0, 1, -1)                  # +1 DEC, -1 INC
+        Xs = S * side.reshape(-1)[None, :] - tc["cost_per_mwh"]
+        mean_edge = Xs.mean(0)
     p_profit = (Xs > 0).mean(0)
     ok = (mean_edge > tc["min_edge"]) & (p_profit > tc["min_p_profit"])
     cand = np.where(ok)[0]
@@ -78,7 +89,9 @@ def size_day(q: np.ndarray, da_hat: np.ndarray, members_med: np.ndarray | None, 
     C = tc["risk_per_mwh"]
     f_single = np.array([kelly_single(X[:, i], C) for i in range(M)])
     f_star = kelly_portfolio(X, C, f0=f_single / max(M, 1), ub=np.maximum(f_single, 1e-6) * 1.5)
-    res.update({"f_star": f_star, "f_single": f_single, "X": X, "mean_edge": X.mean(0),
+    full_edge = X.mean(0)
+    res.update({"f_star": f_star, "f_single": f_single, "X": X,
+                "mean_edge": np.minimum(full_edge, mean_edge[cand]) if tc.get("edge_estimator") == "body" else full_edge,
                 "p_profit": (X > 0).mean(0), "corr": corr})
     caps = capital if isinstance(capital, dict) else {k: capital for k in kappas}
     names = node_names or [""] * q.shape[1]
