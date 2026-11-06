@@ -31,8 +31,18 @@ def line_name(meta: dict, l: int) -> str:
     return f"{nodes[ln['from']]['name']}–{nodes[ln['to']]['name']}"
 
 
+def impact_per_mwh(cfg: dict, node_name: str, mw: float) -> float:
+    """$/MWh our own order moves the DA price against us: linear in size, smaller at liquid hubs and zones."""
+    tc = cfg["trade"]
+    k = tc.get("impact_per_mw", 0.0)
+    if node_name.startswith(("HB_", "LZ_")):
+        k *= tc.get("impact_hub_factor", 0.2)
+    return k * mw
+
+
 def size_day(q: np.ndarray, da_hat: np.ndarray, members_med: np.ndarray | None, cfg: dict, node_corr: np.ndarray,
-             zone_of: np.ndarray, capital: float, rng: np.random.Generator, kappas=(1.0, 0.5, 0.25)) -> dict:
+             zone_of: np.ndarray, capital: float, rng: np.random.Generator, kappas=(1.0, 0.5, 0.25),
+             node_names: list[str] | None = None) -> dict:
     """Select candidates for one day and size them.
 
     q [H,N,Q] calibrated spread quantiles (RT - DA, $/MWh); da_hat [H,N].
@@ -71,6 +81,8 @@ def size_day(q: np.ndarray, da_hat: np.ndarray, members_med: np.ndarray | None, 
     res.update({"f_star": f_star, "f_single": f_single, "X": X, "mean_edge": X.mean(0),
                 "p_profit": (X > 0).mean(0), "corr": corr})
     caps = capital if isinstance(capital, dict) else {k: capital for k in kappas}
+    names = node_names or [""] * q.shape[1]
+    res["impact_k"] = np.array([impact_per_mwh(cfg, names[n], 1.0) for n in nodes])
     res["mw"] = {k: apply_sizing(res, k, caps[k], cfg, zone_of) for k in kappas}
     return res
 
@@ -83,6 +95,10 @@ def apply_sizing(sized: dict, kappa: float, capital: float, cfg: dict, zone_of: 
         return np.zeros(0)
     m = kappa * sized["f_star"] * capital / C
     m = np.minimum(m, tc["max_mw_node_hour"])
+    # price impact: with edge e and impact k per MW, profit m(e - k m) peaks at m = e / 2k
+    kimp = sized.get("impact_k")
+    if kimp is not None:
+        m = np.where(kimp > 0, np.minimum(m, np.maximum(sized["mean_edge"], 0) / (2 * np.maximum(kimp, 1e-9))), m)
     z = zone_of[sized["nodes"]]
     hours = sized["hours"]
     for key in set(zip(z.tolist(), hours.tolist())):
@@ -90,6 +106,10 @@ def apply_sizing(sized: dict, kappa: float, capital: float, cfg: dict, zone_of: 
         tot = m[sel].sum()
         if tot > tc["max_mw_zone_hour"]:
             m[sel] *= tc["max_mw_zone_hour"] / tot
+    # collateral: ERCOT holds credit against every MWh bid or offered; total posted <= available capital
+    coll = tc.get("collateral_per_mwh", 0.0)
+    if coll > 0 and m.sum() * coll > tc.get("collateral_share", 1.0) * capital:
+        m *= tc.get("collateral_share", 1.0) * capital / (m.sum() * coll)
     pnl = sized["X"] @ m
     var95 = -np.quantile(pnl, 0.05)
     cap = tc["max_daily_var95"] * capital
@@ -115,7 +135,7 @@ def make_tickets(day: str, sized: dict, q: np.ndarray, da_hat: np.ndarray, bind:
             continue
         h, n, s = int(sized["hours"][i]), int(sized["nodes"][i]), int(sized["side"][i])
         qq = q[h, n]
-        X = sized["X"][:, i]
+        X = sized["X"][:, i] - sized.get("impact_k", np.zeros(len(mw)))[i] * mw[i]
         exp_da = float(da_hat[h, n])
         exp_rt = exp_da + float(qq[mid])
         edge_need = tc["cost_per_mwh"] + tc["min_edge"]

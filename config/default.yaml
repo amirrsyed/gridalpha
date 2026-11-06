@@ -75,7 +75,11 @@ calibrate:
   method: conformal_quantile_shift
 
 trade:
-  cost_per_mwh: 1.0         # fees + uplift, $/MWh
+  cost_per_mwh: 1.5         # $/MWh per cleared virtual: ERCOT and QSE fees plus slippage (assumed, conservative)
+  impact_per_mw: 0.10       # $/MWh our order moves the DA price per MW bid at one node-hour (assumed)
+  impact_hub_factor: 0.2    # hubs and load zones are far more liquid than single nodes
+  collateral_per_mwh: 75.0  # credit ERCOT holds per MWh of DAM energy bids/offers (assumed)
+  collateral_share: 1.0     # share of capital that may be posted as collateral on one day
   min_edge: 2.0             # $/MWh above costs before a ticket is issued
   min_p_profit: 0.55
   capital: 250000.0         # $ bankroll for the backtest

@@ -182,7 +182,7 @@ function TicketDrawer({ t, m, p, kappa, onClose }) {
           <dt>Expected DA / RT</dt><dd>{fmt.usd(t.exp_da, 2)} / {fmt.usd(t.exp_rt, 2)}</dd>
           <dt>Mean edge after costs</dt><dd>${fmt.num(t.mean_edge)} per MWh</dd>
           <dt>P(profit)</dt><dd>{fmt.pct(t.p_profit)}</dd>
-          <dt>Spread quantiles</dt><dd>q10 {fmt.signed(t.q[2])} · q50 {fmt.signed(t.q[mid])} · q90 {fmt.signed(t.q[6])}</dd>
+          <dt>Spread quantiles</dt><dd>q10 {fmt.signed(t.q[m.quantiles.indexOf(0.1)])} · q50 {fmt.signed(t.q[mid])} · q90 {fmt.signed(t.q[m.quantiles.indexOf(0.9)])} · q99 {m.quantiles.includes(0.99) ? fmt.signed(t.q[m.quantiles.indexOf(0.99)]) : "–"}</dd>
           <dt>Kelly (single / applied)</dt><dd>{fmt.num(calc.fs, 3)} / {fmt.num(applied, 3)}</dd>
           {t.var95_usd != null && <><dt>95% VaR / q01 loss</dt><dd>{fmt.usd(t.var95_usd)} / {fmt.usd(t.loss_q01_usd)}</dd></>}
           {t.constraint && <><dt>Top constraint</dt><dd>{t.constraint} (exposure {fmt.num(t.constraint_exposure, 3)})</dd></>}

@@ -100,3 +100,29 @@ def test_conformal_fixes_overconfident_bands():
     assert coverage(q, y, TAUS) < 0.5
     s = fit_conformal(q[:40], y[:40], TAUS)
     assert abs(coverage(apply_conformal(q[40:], s), y[40:], TAUS) - 0.8) < 0.05
+
+
+def test_impact_moves_the_da_price_against_us():
+    from gridalpha.trade.backtest import settle
+    # DEC: DA 20 + impact 3 = 23 paid; RT 35 -> (35 - 23 - 0.5) * 2
+    assert settle(1, 20.0, 35.0, 30.0, 2.0, 0.5, impact=3.0) == (True, (35.0 - 23.0 - 0.5) * 2.0)
+    # impact pushes the price past the limit: no fill
+    assert settle(1, 28.0, 35.0, 30.0, 2.0, 0.5, impact=3.0) == (False, 0.0)
+    # INC receives DA 40 - 3 = 37; RT 30 -> (37 - 30 - 0.5) * 2
+    assert settle(-1, 40.0, 30.0, 35.0, 2.0, 0.5, impact=3.0) == (True, (37.0 - 30.0 - 0.5) * 2.0)
+
+
+def test_sizing_respects_impact_and_collateral():
+    from gridalpha.config import load_config
+    from gridalpha.trade.tickets import apply_sizing
+    cfg = load_config()
+    rng = np.random.default_rng(0)
+    M = 4
+    sized = {"f_star": np.full(M, 0.5), "nodes": np.arange(M), "hours": np.arange(M),
+             "X": rng.normal(6.0, 2.0, (2000, M)), "mean_edge": np.full(M, 6.0), "impact_k": np.full(M, 0.5)}
+    zone_of = np.zeros(M, int)
+    m = apply_sizing(sized, 1.0, 250000.0, cfg, zone_of)
+    assert (m <= 6.0 / (2 * 0.5) + 1e-6).all()             # profit-maximizing size under impact
+    cfg["trade"]["collateral_per_mwh"] = 1000.0
+    m2 = apply_sizing({**sized, "impact_k": np.zeros(M)}, 1.0, 10000.0, cfg, zone_of)
+    assert m2.sum() * 1000.0 <= 10000.0 + 1e-6
