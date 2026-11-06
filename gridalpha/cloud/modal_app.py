@@ -23,7 +23,7 @@ VOLUME_NAME = "gridalpha-artifacts"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("torch>=2.4", "numpy", "scipy", "pandas", "pyyaml", "lightgbm", "pyarrow")
+    .pip_install_from_requirements(str(_ROOT / "requirements.txt"))   # one list for Actions and Modal
     .add_local_dir(str(_ROOT / "config"), "/root/config")
     .add_local_python_source("gridalpha")
 )

@@ -14,7 +14,7 @@ walk-forward, and publishes a Blueprint.js dashboard. Entry point: `python -m gr
   before D-1 10:00 CT and realized data through D-2 only. `data/build.py::leak_test` must pass.
 - Keep the system signal-only. Nothing may submit bids or touch money.
 - Every change must pass, locally, before a PR:
-  `python -m pytest -q` and `GRIDALPHA_GATES=config/gates_ci.yaml python -m gridalpha.cli run --profile ci`.
+  `python -m pytest -q` and `python -m gridalpha.cli run --profile ci --gates config/gates_ci.yaml`.
 
 ## Map
 - `gridalpha/sim/`: physics-based market simulator (DC-OPF, LMPs from LP duals)

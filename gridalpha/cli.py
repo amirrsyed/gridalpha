@@ -44,9 +44,12 @@ def main(argv=None):
     p.add_argument("--from", dest="from_stage", choices=STAGES)
     p.add_argument("--until", choices=STAGES)
     p.add_argument("--only", choices=STAGES)
+    p.add_argument("--gates", help="gates file, e.g. config/gates_ci.yaml (default config/gates.yaml)")
     p.add_argument("--diagnostic", action="store_true",
                    help="continue past failed gates for inspection; outputs are marked not-for-trading")
     a = p.parse_args(argv)
+    if a.gates:
+        os.environ["GRIDALPHA_GATES"] = a.gates
     cfg = load_config(overrides=a.set, profile=a.profile)
     ap = Autopilot(cfg, log=lambda *x: print(*x, flush=True))
     if a.command == "status":
