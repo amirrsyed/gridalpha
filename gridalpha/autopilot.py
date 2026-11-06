@@ -234,7 +234,16 @@ class Autopilot:
                 simulate(self.cfg, raw, log=self.log)
         else:
             from .data.ercot import fetch
-            fetch(self.cfg, raw, log=self.log)
+            checkpoint = None
+            if os.environ.get("MODAL_TOKEN_ID"):           # in GitHub Actions: save progress as we go
+                from .cloud.modal_launcher import push
+                mark = {"t": 0.0}
+
+                def checkpoint():
+                    t = time.time()
+                    push(self.A, subdirs=("raw",), newer_than=mark["t"])
+                    mark["t"] = t
+            fetch(self.cfg, raw, log=self.log, checkpoint=checkpoint)
         meta = self.meta()
         return {"days": len(meta["dates"]), "first": meta["dates"][0], "last": meta["dates"][-1],
                 "nodes": len(meta["grid"]["nodes"]), "lines": len(meta["grid"]["lines"]), "source": meta["source"],

@@ -46,6 +46,7 @@ jobs:
       - name: Restore data cache, models and pipeline state from the Modal volume
         run: python -m gridalpha.cloud.sync pull
       - name: Autopilot
+        timeout-minutes: 320      # leaves time for the save step below before the job limit
         run: >
           python -m gridalpha.cli run
           --from ${{ github.event.inputs.from_stage || 'ingest' }}

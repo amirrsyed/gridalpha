@@ -27,8 +27,10 @@ def _is_file(entry) -> bool:
 
 
 def push(local: Path, remote_prefix: str = "/artifacts", subdirs=("features", "models", "preds", "raw"),
-         extra_files: dict | None = None):
-    """Upload local subdirectories (and single files) to the volume, overwriting files that exist."""
+         extra_files: dict | None = None, newer_than: float = 0.0):
+    """Upload local subdirectories (and single files) to the volume, overwriting files that exist.
+
+    newer_than: only files modified after this Unix time (for incremental checkpoints)."""
     vol = _volume()
     with vol.batch_upload(force=True) as batch:
         for sub in subdirs:
@@ -36,7 +38,7 @@ def push(local: Path, remote_prefix: str = "/artifacts", subdirs=("features", "m
             if not d.is_dir():
                 continue
             for f in d.rglob("*"):
-                if f.is_file():
+                if f.is_file() and f.stat().st_mtime > newer_than and not f.name.endswith(".part"):
                     batch.put_file(str(f), f"{remote_prefix}/{f.relative_to(local).as_posix()}")
         for src, dest in (extra_files or {}).items():
             if Path(src).is_file():

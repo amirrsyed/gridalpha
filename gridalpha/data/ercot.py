@@ -233,7 +233,11 @@ def _gas(log=print) -> pd.Series:
 # fetch + assemble
 # ---------------------------------------------------------------------------------------
 
-def fetch(cfg: dict, out_dir: Path, end: str | None = None, log=print) -> Path:
+def fetch(cfg: dict, out_dir: Path, end: str | None = None, log=print, checkpoint=None, every: int = 40) -> Path:
+    """Download (or read from cache) every day from ercot.start to tomorrow and build the raw dataset.
+
+    checkpoint: optional callable run every `every` days, used to save the cache to cloud storage so a
+    run that hits a time limit loses at most a few dozen days of downloads."""
     ec = cfg["ercot"]
     fx = _Fetcher(out_dir / "cache", log)
     api = _api()
@@ -257,8 +261,14 @@ def fetch(cfg: dict, out_dir: Path, end: str | None = None, log=print) -> Path:
         S["solar"][d] = fx.get("solar_fcst", d, lambda: _region_fcst(
             api.get_solar_actual_and_forecast_by_geographical_region_hourly, "STPPF", SOLAR_REGIONS, d))
         S["temp"][d] = fx.get("temp_fcst", d, lambda: _open_meteo(d))
-        if i % 25 == 0 or i == len(days) - 1:
+        if i % 10 == 0 or i == len(days) - 1:
             log(f"  ercot: {d:%Y-%m-%d} ({i + 1}/{len(days)} days, {time.time() - t0:.0f}s)")
+        if checkpoint is not None and (i + 1) % every == 0:
+            try:
+                checkpoint()
+                log(f"  ercot: cache saved through {d:%Y-%m-%d}")
+            except Exception as ex:  # noqa: BLE001 - a failed checkpoint must not stop the download
+                log(f"  ercot: cache checkpoint failed ({ex}); continuing")
     if fx.errors:
         (out_dir / "fetch_errors.json").write_text(json.dumps(fx.errors, indent=1))
     return assemble(days, S, _gas(log), cfg, out_dir, log)
