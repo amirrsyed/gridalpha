@@ -10,6 +10,16 @@ from gridalpha.train.calibrate import apply_conformal, coverage, fit_conformal
 TAUS = [0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98]
 
 
+def test_backtest_settle_skips_missing_prices():
+    from gridalpha.trade.backtest import settle
+    nan = float("nan")
+    assert settle(1, 20.0, nan, 30.0, 5.0, 0.5) is None   # missing RT print
+    assert settle(-1, nan, 40.0, 10.0, 5.0, 0.5) is None  # missing DA print
+    assert settle(1, 20.0, 35.0, 30.0, 2.0, 0.5) == (True, (15.0 - 0.5) * 2.0)
+    assert settle(1, 31.0, 35.0, 30.0, 2.0, 0.5) == (False, 0.0)
+    assert settle(-1, 40.0, 35.0, 30.0, 2.0, 0.5) == (True, (5.0 - 0.5) * 2.0)
+
+
 def test_ptdf_balances_flows():
     g = build_grid(7)
     P = g.ptdf()

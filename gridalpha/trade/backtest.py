@@ -45,6 +45,18 @@ def theme_of(n: int, h: int, da_act: float, rt_act: float, dc_near: set) -> str:
     return "Other"
 
 
+def settle(side: int, da: float, rt: float, limit: float, mw: float, cost: float) -> tuple[bool, float] | None:
+    """Clear and settle one virtual ticket; None if a realized price is missing.
+
+    Real data has settlement gaps (missing DA or RT prints). Such tickets cannot be settled, so they
+    are excluded from P&L instead of poisoning it with NaN.
+    """
+    if not (np.isfinite(da) and np.isfinite(rt)):
+        return None
+    cleared = bool(da <= limit) if side > 0 else bool(da >= limit)
+    return cleared, ((side * (rt - da) - cost) * mw if cleared else 0.0)
+
+
 def _metrics(daily: np.ndarray, capital0: float, trades: list, compound: bool = False) -> dict:
     eq = capital0 + np.cumsum(daily)
     peak = np.maximum.accumulate(np.concatenate([[capital0], eq]))[1:]
@@ -78,7 +90,8 @@ def backtest_model(ap, name: str, live_day: int) -> dict:
     cap = {k: tc["capital"] for k in KAPPAS}
     daily = {k: [] for k in KAPPAS}
     trades = {k: [] for k in KAPPAS}
-    counts = {k: {"n_tickets": 0, "n_cleared": 0, "wins": 0, "mwh": 0.0, "at_cap": 0} for k in KAPPAS}
+    counts = {k: {"n_tickets": 0, "n_cleared": 0, "wins": 0, "mwh": 0.0, "at_cap": 0, "n_unsettled": 0}
+              for k in KAPPAS}
     dates = []
     for i, d in enumerate(res["days"]):
         if d == live_day:
@@ -97,8 +110,11 @@ def backtest_model(ap, name: str, live_day: int) -> dict:
                 need = tc["cost_per_mwh"] + tc["min_edge"]
                 limit = exp_rt - need if s > 0 else exp_rt + need
                 dA, rT = float(da_act[h, n]), float(rt_act[h, n])
-                cleared = (dA <= limit) if s > 0 else (dA >= limit)
-                pnl = (s * (rT - dA) - tc["cost_per_mwh"]) * mw[j] if cleared else 0.0
+                settled = settle(s, dA, rT, limit, float(mw[j]), tc["cost_per_mwh"])
+                if settled is None:
+                    counts[k]["n_unsettled"] += 1
+                    continue
+                cleared, pnl = settled
                 pnl_day += pnl
                 c = counts[k]
                 c["n_tickets"] += 1
@@ -126,6 +142,7 @@ def backtest_model(ap, name: str, live_day: int) -> dict:
         m = _metrics(dv, tc["capital"], trades[k], tc.get("compound", False))
         c = counts[k]
         m.update({"n_tickets": c["n_tickets"], "n_cleared": c["n_cleared"], "mwh": c["mwh"],
+                  "n_unsettled": c["n_unsettled"],
                   "hit_rate": c["wins"] / c["n_cleared"] if c["n_cleared"] else 0.0,
                   "share_at_cap": c["at_cap"] / c["n_tickets"] if c["n_tickets"] else 0.0})
         by_theme = {t: float(sum(x["pnl"] for x in trades[k] if x["theme"] == t)) for t in THEMES}
