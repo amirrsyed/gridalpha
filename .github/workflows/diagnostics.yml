@@ -1,0 +1,35 @@
+# On demand: export out-of-sample predictions and realized prices (no GPU) for offline analysis.
+name: diagnostics
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Pull predictions and prices from the Modal volume
+        run: |
+          python - <<'PY'
+          from gridalpha.config import artifacts, load_config
+          from gridalpha.cloud.modal_launcher import pull
+          A = artifacts(load_config())
+          pull(A, subdirs=("preds",), extra_files={"/artifacts/raw/market.npz": A / "raw" / "market.npz",
+                                                   "/artifacts/raw/meta.json": A / "raw" / "meta.json"})
+          PY
+      - run: python -m gridalpha.tools.export_diag diag.npz && ls -la diag.npz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diag
+          path: diag.npz
+          retention-days: 7
