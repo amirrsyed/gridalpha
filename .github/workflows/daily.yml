@@ -57,7 +57,7 @@ jobs:
             2. If the failure is transient (network errors, rate limits) and the code already retries, do not change
                code: comment on the matching open issue (gh issue list --label autopilot) that a rerun should fix it.
             3. Otherwise fix it on a new branch, verify with `python -m pytest -q` and
-               `GRIDALPHA_GATES=config/gates_ci.yaml python -m gridalpha.cli run --profile ci`, push, and open a
+               `python -m gridalpha.cli run --profile ci --gates config/gates_ci.yaml`, push, and open a
                pull request against main with `gh pr create`. If an open pull request already addresses this
                failure, comment there instead of opening another.
             4. Comment on the matching open issue with what you found and the pull request link.

@@ -33,4 +33,4 @@ jobs:
           claude_args: >-
             --max-turns 40
             --append-system-prompt "You maintain GridAlpha. Read CLAUDE.md first. Never edit config/gates.yaml or the trade section of config/default.yaml.
-            Verify every change with: GRIDALPHA_GATES=config/gates_ci.yaml python -m gridalpha.cli run --profile ci and python -m pytest -q."
+            Verify every change with: python -m gridalpha.cli run --profile ci --gates config/gates_ci.yaml and python -m pytest -q."
