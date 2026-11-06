@@ -49,6 +49,8 @@ WIND_TO_ZONE = {"NORTH": ["NORTH", "PANHANDLE"], "HOUSTON": ["COASTAL"], "SOUTH"
 SOLAR_TO_ZONE = {"NORTH": ["CenterEast", "NorthWest"], "HOUSTON": ["SouthEast", "FarEast"],
                  "SOUTH": ["SouthEast", "CenterWest"], "WEST": ["FarWest", "CenterWest"]}
 HUB_AVG = "HB_HUBAVG"
+NAME_TO_KEY = {"da_spp": "da", "rt_spp": "rt", "dam_shadow": "dsh", "sced_shadow": "rsh", "load_fcst": "load",
+               "wind_fcst": "wind", "solar_fcst": "solar", "temp_fcst": "temp"}
 
 
 # ---------------------------------------------------------------------------------------
@@ -128,13 +130,15 @@ class _Fetcher:
         self.cache = cache
         self.log = log
         self.errors: dict[str, str] = {}
+        self.failed: dict[str, list[str]] = {}          # dataset -> days still missing after retries
+        self.pending: list[tuple] = []                  # (name, day, fn) worth another try later
         self.cutoff = _today_ct() - pd.Timedelta(days=3)
 
     def get(self, name: str, day: pd.Timestamp, fn) -> pd.DataFrame:
         path = self.cache / CACHE_VERSION / name / f"{day:%Y-%m-%d}.parquet"
         if path.exists():
             return pd.read_parquet(path)
-        df, final = None, False
+        df, final, transient = None, False, False
         for attempt in range(2):
             try:
                 df = fn()
@@ -154,9 +158,14 @@ class _Fetcher:
                     break
                 if attempt == 1:
                     self._note(name, day, e)
+                    transient = True
                 time.sleep(5)
         if df is None:
             df = pd.DataFrame(index=range(H))
+            if transient:
+                self.pending.append((name, day, fn))
+            else:
+                self.failed.setdefault(name, []).append(f"{day:%Y-%m-%d}")
         if final and day <= self.cutoff:
             path.parent.mkdir(parents=True, exist_ok=True)
             df.columns = [str(c) for c in df.columns]
@@ -247,20 +256,20 @@ def fetch(cfg: dict, out_dir: Path, end: str | None = None, log=print, checkpoin
     S = {k: {} for k in ["da", "rt", "dsh", "rsh", "load", "wind", "solar", "temp"]}
     t0 = time.time()
     for i, d in enumerate(days):
-        S["da"][d] = fx.get("da_spp", d, lambda: _pivot_hourly(api.get_spp_day_ahead_hourly(d), d, ("SPP",), ("Location",)))
-        S["dsh"][d] = fx.get("dam_shadow", d, lambda: _pivot_hourly(api.get_shadow_prices_dam(d), d, ("Shadow Price",),
+        S["da"][d] = fx.get("da_spp", d, lambda d=d: _pivot_hourly(api.get_spp_day_ahead_hourly(d), d, ("SPP",), ("Location",)))
+        S["dsh"][d] = fx.get("dam_shadow", d, lambda d=d: _pivot_hourly(api.get_shadow_prices_dam(d), d, ("Shadow Price",),
                                                                   ("Constraint Name",)))
         if d < today:            # real time for today is incomplete and tomorrow has not happened
-            S["rt"][d] = fx.get("rt_spp", d, lambda: _pivot_hourly(api.get_spp_real_time_15_min(d), d, ("SPP",),
+            S["rt"][d] = fx.get("rt_spp", d, lambda d=d: _pivot_hourly(api.get_spp_real_time_15_min(d), d, ("SPP",),
                                                                   ("Location",)))
-            S["rsh"][d] = fx.get("sced_shadow", d, lambda: _pivot_hourly(api.get_shadow_prices_sced(d), d,
+            S["rsh"][d] = fx.get("sced_shadow", d, lambda d=d: _pivot_hourly(api.get_shadow_prices_sced(d), d,
                                                                        ("Shadow Price",), ("Constraint Name",)))
-        S["load"][d] = fx.get("load_fcst", d, lambda: _load_fcst(api, d))
-        S["wind"][d] = fx.get("wind_fcst", d, lambda: _region_fcst(
+        S["load"][d] = fx.get("load_fcst", d, lambda d=d: _load_fcst(api, d))
+        S["wind"][d] = fx.get("wind_fcst", d, lambda d=d: _region_fcst(
             api.get_wind_actual_and_forecast_by_geographical_region_hourly, "STWPF", WIND_REGIONS, d))
-        S["solar"][d] = fx.get("solar_fcst", d, lambda: _region_fcst(
+        S["solar"][d] = fx.get("solar_fcst", d, lambda d=d: _region_fcst(
             api.get_solar_actual_and_forecast_by_geographical_region_hourly, "STPPF", SOLAR_REGIONS, d))
-        S["temp"][d] = fx.get("temp_fcst", d, lambda: _open_meteo(d))
+        S["temp"][d] = fx.get("temp_fcst", d, lambda d=d: _open_meteo(d))
         if i % 10 == 0 or i == len(days) - 1:
             log(f"  ercot: {d:%Y-%m-%d} ({i + 1}/{len(days)} days, {time.time() - t0:.0f}s)")
         if checkpoint is not None and (i + 1) % every == 0:
@@ -269,8 +278,20 @@ def fetch(cfg: dict, out_dir: Path, end: str | None = None, log=print, checkpoin
                 log(f"  ercot: cache saved through {d:%Y-%m-%d}")
             except Exception as ex:  # noqa: BLE001 - a failed checkpoint must not stop the download
                 log(f"  ercot: cache checkpoint failed ({ex}); continuing")
-    if fx.errors:
-        (out_dir / "fetch_errors.json").write_text(json.dumps(fx.errors, indent=1))
+    # second pass: most failures are ERCOT rate limits or brief outages, so try them again after a pause
+    if fx.pending:
+        log(f"  ercot: retrying {len(fx.pending)} failed downloads after a 60 s pause")
+        time.sleep(60)
+        pending, fx.pending = fx.pending, []
+        for name, d, fn in pending:
+            S[NAME_TO_KEY[name]][d] = fx.get(name, d, fn)
+        for name, d, _ in fx.pending:
+            fx.failed.setdefault(name, []).append(f"{d:%Y-%m-%d}")
+        still = sum(len(v) for v in fx.failed.values())
+        log(f"  ercot: retry pass done; {still} dataset-days still missing")
+    if fx.errors or fx.failed:
+        (out_dir / "fetch_errors.json").write_text(json.dumps({"first_error": fx.errors, "missing_days": fx.failed},
+                                                               indent=1))
     return assemble(days, S, _gas(log), cfg, out_dir, log)
 
 

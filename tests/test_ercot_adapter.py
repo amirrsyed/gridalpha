@@ -101,3 +101,26 @@ def test_fetch_assembles_a_valid_point_in_time_dataset(fake):
     calls = api.calls
     ercot.fetch(cfg, tmp / "raw", log=lambda *a: None)
     assert api.calls - calls <= 4 * 2
+
+
+def test_transient_failures_are_retried_after_the_main_pass(fake, monkeypatch):
+    api, tmp = fake
+    flaky_day = ercot._today_ct() - pd.Timedelta(days=20)
+    calls = {"n": 0}
+    real = api.get_wind_actual_and_forecast_by_geographical_region_hourly
+
+    def flaky(pub_day):
+        if pd.Timestamp(pub_day) == flaky_day - pd.Timedelta(days=1):
+            calls["n"] += 1
+            if calls["n"] <= 2:                                   # both first-pass attempts fail
+                raise RuntimeError("Error: Failed after 3 retries")
+        return real(pub_day)
+
+    monkeypatch.setattr(api, "get_wind_actual_and_forecast_by_geographical_region_hourly", flaky)
+    start = (ercot._today_ct() - pd.Timedelta(days=45)).strftime("%Y-%m-%d")
+    cfg = load_config(overrides=[f"ercot.start={start}", "ercot.max_nodes=50"])
+    out = ercot.fetch(cfg, tmp / "raw2", log=lambda *a: None)
+    raw, meta = load_raw(out)
+    i = meta["dates"].index(flaky_day.strftime("%Y-%m-%d"))
+    assert calls["n"] == 3                                        # failed twice, filled by the retry pass
+    assert raw["wind_fcst_cf"][i].sum() > 0
