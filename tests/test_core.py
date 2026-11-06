@@ -126,3 +126,19 @@ def test_sizing_respects_impact_and_collateral():
     cfg["trade"]["collateral_per_mwh"] = 1000.0
     m2 = apply_sizing({**sized, "impact_k": np.zeros(M)}, 1.0, 10000.0, cfg, zone_of)
     assert m2.sum() * 1000.0 <= 10000.0 + 1e-6
+
+
+def test_daily_readiness_accepts_shadow_backtest(tmp_path):
+    from types import SimpleNamespace
+    from gridalpha.cli import models_ready
+    cfg = {"walk_forward": {"folds": 1}, "train": {"ensemble_seeds": [1]}}
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "gnn_fold0_seed1.pt").write_bytes(b"x")
+    st = {"train": {"status": "passed"}, "calibrate": {"status": "passed"},
+          "backtest": {"status": "gate_failed", "shadow": False}}
+    ap = SimpleNamespace(state={"stages": st}, cfg=cfg, A=tmp_path)
+    assert models_ready(ap)[0] is False                    # a hard backtest failure blocks tickets
+    st["backtest"]["shadow"] = True
+    assert models_ready(ap)[0] is True                     # shadow tickets are allowed
+    st["train"]["status"] = "gate_failed"
+    assert models_ready(ap)[0] is False                    # the model itself must still pass

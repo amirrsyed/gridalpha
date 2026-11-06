@@ -223,7 +223,10 @@ def live_signals(ap) -> dict:
                            members_med)
     out_dir = ap.A / "signals"
     out_dir.mkdir(exist_ok=True)
-    payload = {"operating_day": date, "diagnostic": any(st.get("diagnostic_override") for st in ap.state["stages"].values()), "capital": capital, "kelly_fraction": k, "model_version": version,
+    bst = ap.state["stages"].get("backtest", {})
+    payload = {"operating_day": date, "diagnostic": any(st.get("diagnostic_override") for st in ap.state["stages"].values()),
+               "shadow": bool(bst.get("shadow")) or bst.get("status") != "passed",
+               "shadow_failed": (bst.get("gate") or {}).get("failed", []), "capital": capital, "kelly_fraction": k, "model_version": version,
                "tickets": tickets,
                "grid_forecast": {"median_spread": np.round(q[..., mid], 2).tolist(),
                                  "q10": np.round(q[..., taus.index(0.1)], 2).tolist(),

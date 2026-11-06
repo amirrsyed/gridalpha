@@ -23,11 +23,14 @@ def _gh_output(key: str, value: str):
 
 
 def models_ready(ap) -> tuple[bool, str]:
-    """Daily tickets need a retrain whose train, calibrate and backtest gates all passed."""
+    """Daily tickets need a retrain whose train and calibrate gates passed, and whose backtest gate
+    passed or failed in shadow mode (tickets are then labeled shadow / not for trading)."""
     st = ap.state["stages"]
     for s in ["train", "calibrate", "backtest"]:
-        if st.get(s, {}).get("status") != "passed":
-            return False, f"the last retrain's {s} stage is '{st.get(s, {}).get('status', 'pending')}'"
+        status = st.get(s, {}).get("status")
+        if status == "passed" or (s == "backtest" and st.get(s, {}).get("shadow")):
+            continue
+        return False, f"the last retrain's {s} stage is '{status or 'pending'}'"
     k = ap.cfg["walk_forward"]["folds"] - 1
     missing = [s for s in ap.cfg["train"]["ensemble_seeds"]
                if not (ap.A / "models" / f"gnn_fold{k}_seed{s}.pt").exists()]

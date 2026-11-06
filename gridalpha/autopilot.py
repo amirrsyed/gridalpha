@@ -24,6 +24,7 @@ import numpy as np
 
 from .config import artifacts, load_gates
 
+SOFT_GATES = ("backtest",)     # may fail without stopping the run when publish.shadow_if_backtest_fails
 STAGES = ["ingest", "validate", "features", "pretrain", "baselines", "train", "calibrate", "backtest", "signals",
           "publish"]
 
@@ -100,7 +101,7 @@ class Autopilot:
                     break
                 continue
             self.log(f"[run ] {name}")
-            st.update({"status": "running", "started": _now(), "error": None})
+            st.update({"status": "running", "started": _now(), "error": None, "shadow": False})
             self.save()
             t0 = time.time()
             try:
@@ -123,6 +124,14 @@ class Autopilot:
             run["stages"].append({"stage": name, "status": st["status"], "secs": st["secs"]})
             self.save()
             self.log(f"[{st['status']}] {name} in {st['secs']}s" + (f" -> {st['error']}" if st.get("error") else ""))
+            if (st["status"] == "gate_failed" and name in SOFT_GATES
+                    and self.cfg.get("publish", {}).get("shadow_if_backtest_fails", False)):
+                st["shadow"] = True
+                self.log(f"[shadow] {name} gate failed; continuing with tickets labeled shadow (not for trading)")
+                self.save()
+                if until == name or only:
+                    break
+                continue
             if st["status"] == "gate_failed" and diagnostic:
                 st["diagnostic_override"] = True
                 self.notify_failure(name, st)
