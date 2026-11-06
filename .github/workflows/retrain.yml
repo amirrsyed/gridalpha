@@ -18,8 +18,11 @@ on:
         default: publish
         options: [ingest, validate, features, pretrain, baselines, train, calibrate, backtest, signals, publish]
 permissions:
-  contents: read
+  contents: write          # the AI engineer step pushes a fix branch
+  pull-requests: write
   issues: write
+  actions: read
+  id-token: write          # lets the Claude GitHub App act, so its pull requests trigger CI
 concurrency:
   group: gridalpha-retrain
   cancel-in-progress: false
@@ -55,6 +58,26 @@ jobs:
       - name: Save data cache, models and state (also after a failure, so the next run resumes)
         if: always()
         run: python -m gridalpha.cloud.sync push
+      - name: AI engineer (only when the autopilot failed)
+        if: failure() && hashFiles('state/ALERT.md') != ''
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            The GridAlpha autopilot failed in workflow run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.
+            state/ALERT.md has the failed stage, gate result, metrics and traceback. Read it and CLAUDE.md first.
+            1. Find the cause in the code or data handling. Do not edit config/gates.yaml, the trade section of
+               config/default.yaml, or anything in .github/. Never loosen a gate to make it pass.
+            2. If the failure is transient (network errors, rate limits) and the code already retries, do not change
+               code: comment on the matching open issue (gh issue list --label autopilot) that a rerun should fix it.
+            3. Otherwise fix it on a new branch, verify with `python -m pytest -q` and
+               `GRIDALPHA_GATES=config/gates_ci.yaml python -m gridalpha.cli run --profile ci`, push, and open a
+               pull request against main with `gh pr create`. If an open pull request already addresses this
+               failure, comment there instead of opening another.
+            4. Comment on the matching open issue with what you found and the pull request link.
+          claude_args: >-
+            --max-turns 40
+            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(git:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue view:*)"
       - name: Keep the dashboard data from this run
         if: always()
         uses: actions/upload-artifact@v4
