@@ -1,28 +1,29 @@
-# Weekly (and on demand): fresh ERCOT data and a full walk-forward retrain on cloud GPUs through Modal.
-# The autopilot fans fold x seed jobs out in parallel, checks every gate, and opens an issue for
-# the Claude Code agent if anything fails. Spend is capped by compute.monthly_budget_usd.
+# LAB BRANCH ONLY (never merged): same as main's retrain, plus optional inputs that apply a code
+# patch and run an analysis script, so experiments run on real data without a new branch each time.
 name: retrain
 on:
-  schedule:
-    - cron: "0 6 * * 0"        # Sundays 06:00 UTC
   workflow_dispatch:
     inputs:
       from_stage:
-        description: "Start from this stage (ingest = fetch new data and redo everything)"
         type: choice
         default: ingest
         options: [ingest, validate, features, pretrain, baselines, train, calibrate, backtest, signals, publish]
       until_stage:
-        description: "Stop after this stage (features = data only, no GPU cost)"
         type: choice
         default: publish
         options: [ingest, validate, features, pretrain, baselines, train, calibrate, backtest, signals, publish]
+      run_autopilot:
+        type: boolean
+        default: true
+      patch_b64:
+        description: "base64 tar.gz of files to overlay on the checkout"
+        default: ""
+      script_b64:
+        description: "base64 Python script to run after the autopilot"
+        default: ""
 permissions:
-  contents: write          # the AI engineer step pushes a fix branch
-  pull-requests: write
+  contents: read
   issues: write
-  actions: read
-  id-token: write          # lets the Claude GitHub App act, so its pull requests trigger CI
 concurrency:
   group: gridalpha-retrain
   cancel-in-progress: false
@@ -36,52 +37,38 @@ jobs:
       ERCOT_API_USERNAME: ${{ secrets.ERCOT_API_USERNAME }}
       ERCOT_API_PASSWORD: ${{ secrets.ERCOT_API_PASSWORD }}
       ERCOT_PUBLIC_API_SUBSCRIPTION_KEY: ${{ secrets.ERCOT_PUBLIC_API_SUBSCRIPTION_KEY }}
-      GH_TOKEN: ${{ github.token }}
+      GRIDALPHA_NO_ISSUES: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Apply lab patch
+        env:
+          PATCH: ${{ github.event.inputs.patch_b64 }}
+        run: |
+          if [ -n "$PATCH" ]; then echo "$PATCH" | base64 -d | tar -xz -C . && echo "patch applied"; git status --short; fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Deploy the Modal app (GPU functions)
+        if: github.event.inputs.run_autopilot == 'true'
         run: modal deploy -m gridalpha.cloud.modal_app
       - name: Restore data cache, models and pipeline state from the Modal volume
         run: python -m gridalpha.cloud.sync pull
       - name: Autopilot
-        timeout-minutes: 320      # leaves time for the save step below before the job limit
+        if: github.event.inputs.run_autopilot == 'true'
+        timeout-minutes: 320
         run: >
           python -m gridalpha.cli run
-          --from ${{ github.event.inputs.from_stage || 'ingest' }}
-          --until ${{ github.event.inputs.until_stage || 'publish' }}
+          --from ${{ github.event.inputs.from_stage }}
+          --until ${{ github.event.inputs.until_stage }}
           --set project.data_source=ercot --set compute.backend=modal
-      - name: Save data cache, models and state (also after a failure, so the next run resumes)
-        if: always()
+      - name: Save data cache, models and state
+        if: always() && github.event.inputs.run_autopilot == 'true'
         run: python -m gridalpha.cloud.sync push
-      - name: AI engineer (only when the autopilot failed)
-        if: failure() && hashFiles('state/ALERT.md') != ''
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
-            The GridAlpha autopilot failed in workflow run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.
-            state/ALERT.md has the failed stage, gate result, metrics and traceback. Read it and CLAUDE.md first.
-            1. Find the cause in the code or data handling. Do not edit config/gates.yaml, the trade section of
-               config/default.yaml, or anything in .github/. Never loosen a gate to make it pass.
-            2. If the failure is transient (network errors, rate limits) and the code already retries, do not change
-               code: comment on the matching open issue (gh issue list --label autopilot) that a rerun should fix it.
-            3. Otherwise fix it on a new branch, verify with `python -m pytest -q` and
-               `python -m gridalpha.cli run --profile ci --gates config/gates_ci.yaml`, push, and open a
-               pull request against main with `gh pr create`. If an open pull request already addresses this
-               failure, comment there instead of opening another.
-            4. Comment on the matching open issue with what you found and the pull request link.
-          claude_args: >-
-            --max-turns 40
-            --allowedTools "Edit,Write,Read,Glob,Grep,Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(git:*),Bash(gh pr create:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue list:*),Bash(gh issue comment:*),Bash(gh issue view:*)"
-      - name: Keep the dashboard data from this run
+      - name: Lab script
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: signals-json
-          path: artifacts/site/signals.json
-          if-no-files-found: ignore
+        env:
+          SCRIPT: ${{ github.event.inputs.script_b64 }}
+        run: |
+          if [ -n "$SCRIPT" ]; then echo "$SCRIPT" | base64 -d > lab.py && python lab.py; fi
