@@ -9,7 +9,7 @@ import numpy as np
 
 from ..data.build import GLOBAL_FEATURES, NODE_FEATURES
 
-LGBM_TAUS = [0.05, 0.25, 0.5, 0.75, 0.95]
+LGBM_TAUS = [0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99]
 
 
 def interp_quantiles(qk: np.ndarray, taus_from, taus_to) -> np.ndarray:
