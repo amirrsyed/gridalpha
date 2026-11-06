@@ -56,8 +56,10 @@ def _download(vol, remote: str, dest: Path):
 
 def pull(local: Path, remote_prefix: str = "/artifacts", subdirs=("models", "preds"), extra_files: dict | None = None):
     """Download files under the given volume subdirectories; skip files already present with the same size."""
+    from concurrent.futures import ThreadPoolExecutor
     vol = _volume()
     prefix = remote_prefix.strip("/")
+    todo = []
     for sub in subdirs:
         try:
             entries = vol.listdir(f"{remote_prefix}/{sub}", recursive=True)
@@ -70,7 +72,17 @@ def pull(local: Path, remote_prefix: str = "/artifacts", subdirs=("models", "pre
             dest = local / rel
             if dest.is_file() and getattr(e, "size", None) == dest.stat().st_size:
                 continue
-            _download(vol, e.path, dest)
+            todo.append((e.path, dest))
+    # small files dominate: download several at a time, then retry any failures one by one
+    failed = []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for (remote, dest), fut in zip(todo, [ex.submit(_download, vol, r, d) for r, d in todo]):
+            try:
+                fut.result()
+            except Exception:  # noqa: BLE001
+                failed.append((remote, dest))
+    for remote, dest in failed:
+        _download(vol, remote, dest)
     for remote, dest in (extra_files or {}).items():
         try:
             _download(vol, remote, Path(dest))
