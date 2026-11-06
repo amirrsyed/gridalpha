@@ -1,6 +1,6 @@
-# Weekly (and on demand): full walk-forward retrain on cloud GPUs through Modal.
-# The autopilot fans fold x seed jobs out in parallel, checks every gate, and opens an
-# issue for the Claude Code agent if anything fails. Budget is enforced in config.
+# Weekly (and on demand): fresh ERCOT data and a full walk-forward retrain on cloud GPUs through Modal.
+# The autopilot fans fold x seed jobs out in parallel, checks every gate, and opens an issue for
+# the Claude Code agent if anything fails. Spend is capped by compute.monthly_budget_usd.
 name: retrain
 on:
   schedule:
@@ -8,8 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       from_stage:
-        description: "Redo from this stage (default: features)"
-        default: features
+        description: "Start from this stage (ingest = fetch new data and redo everything)"
+        type: choice
+        default: ingest
+        options: [ingest, validate, features, pretrain, baselines, train, calibrate, backtest, signals, publish]
+      until_stage:
+        description: "Stop after this stage (features = data only, no GPU cost)"
+        type: choice
+        default: publish
+        options: [ingest, validate, features, pretrain, baselines, train, calibrate, backtest, signals, publish]
 permissions:
   contents: read
   issues: write
@@ -19,7 +26,7 @@ concurrency:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
     env:
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
@@ -36,12 +43,22 @@ jobs:
       - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Deploy the Modal app (GPU functions)
         run: modal deploy -m gridalpha.cloud.modal_app
-      - name: Restore state from the Modal volume
+      - name: Restore data cache, models and pipeline state from the Modal volume
         run: python -m gridalpha.cloud.sync pull
-      - name: Autopilot (cloud GPUs)
+      - name: Autopilot
+        timeout-minutes: 320      # leaves time for the save step below before the job limit
         run: >
-          python -m gridalpha.cli run --from ${{ github.event.inputs.from_stage || 'features' }}
+          python -m gridalpha.cli run
+          --from ${{ github.event.inputs.from_stage || 'ingest' }}
+          --until ${{ github.event.inputs.until_stage || 'publish' }}
           --set project.data_source=ercot --set compute.backend=modal
-      - name: Save state
+      - name: Save data cache, models and state (also after a failure, so the next run resumes)
         if: always()
         run: python -m gridalpha.cloud.sync push
+      - name: Keep the dashboard data from this run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signals-json
+          path: artifacts/site/signals.json
+          if-no-files-found: ignore

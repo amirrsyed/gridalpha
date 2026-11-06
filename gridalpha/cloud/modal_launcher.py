@@ -1,6 +1,7 @@
 """Client side of the Modal backend: sync artifacts up, fan jobs out, sync results down."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 VOLUME_NAME = "gridalpha-artifacts"
@@ -15,32 +16,66 @@ def _function(name: str):
         return modal.Function.lookup(APP_NAME, name)
 
 
-def push(local: Path, remote_prefix: str = "/artifacts", subdirs=("features", "models", "preds", "raw")):
+def _volume():
     import modal
-    vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+    return modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+
+
+def _is_file(entry) -> bool:
+    from modal.volume import FileEntryType
+    return entry.type == FileEntryType.FILE
+
+
+def push(local: Path, remote_prefix: str = "/artifacts", subdirs=("features", "models", "preds", "raw"),
+         extra_files: dict | None = None, newer_than: float = 0.0):
+    """Upload local subdirectories (and single files) to the volume, overwriting files that exist.
+
+    newer_than: only files modified after this Unix time (for incremental checkpoints)."""
+    vol = _volume()
     with vol.batch_upload(force=True) as batch:
         for sub in subdirs:
             d = local / sub
-            if d.exists():
-                batch.put_directory(str(d), f"{remote_prefix}/{sub}")
+            if not d.is_dir():
+                continue
+            for f in d.rglob("*"):
+                if f.is_file() and f.stat().st_mtime > newer_than and not f.name.endswith(".part"):
+                    batch.put_file(str(f), f"{remote_prefix}/{f.relative_to(local).as_posix()}")
+        for src, dest in (extra_files or {}).items():
+            if Path(src).is_file():
+                batch.put_file(str(src), dest)
 
 
-def pull(local: Path, remote_prefix: str = "/artifacts", subdirs=("models", "preds")):
-    import modal
-    vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+def _download(vol, remote: str, dest: Path):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    with open(tmp, "wb") as fh:
+        for chunk in vol.read_file(remote):
+            fh.write(chunk)
+    os.replace(tmp, dest)
+
+
+def pull(local: Path, remote_prefix: str = "/artifacts", subdirs=("models", "preds"), extra_files: dict | None = None):
+    """Download files under the given volume subdirectories; skip files already present with the same size."""
+    vol = _volume()
+    prefix = remote_prefix.strip("/")
     for sub in subdirs:
         try:
             entries = vol.listdir(f"{remote_prefix}/{sub}", recursive=True)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - nothing stored yet
             continue
         for e in entries:
-            if getattr(e, "type", None) and str(e.type).endswith("DIRECTORY"):
+            if not _is_file(e):
                 continue
-            dest = local / Path(e.path).relative_to(remote_prefix.lstrip("/"))
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with open(dest, "wb") as fh:
-                for chunk in vol.read_file(e.path):
-                    fh.write(chunk)
+            rel = Path(e.path.strip("/")).relative_to(prefix)
+            dest = local / rel
+            if dest.is_file() and getattr(e, "size", None) == dest.stat().st_size:
+                continue
+            _download(vol, e.path, dest)
+    for remote, dest in (extra_files or {}).items():
+        try:
+            _download(vol, remote, Path(dest))
+        except Exception:  # noqa: BLE001 - first run: nothing saved yet
+            pass
 
 
 def run_on_modal(ap, kind: str, jobs: list[dict]):

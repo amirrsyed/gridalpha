@@ -171,10 +171,12 @@ def live_signals(ap) -> dict:
         das.append(p["da"])
         binds.append(p["bind"])
         meds.append(p["q"][..., mid])
-        val_qs.append(np.load(ap.A / "preds" / f"gnn_fold{last['k']}_seed{s}.npz")["val_q"])
+        saved = np.load(ap.A / "preds" / f"gnn_fold{last['k']}_seed{s}.npz")
+        val_qs.append(saved["val_q"])
+        val_days = saved["val_days"]          # the window the model was calibrated on, not today's fold plan
         if att is None:
             att, names = attributions(model, F, day, cfg, last["train"])
-    shifts = fit_conformal(ensemble(val_qs), F["y_spread"][last["val"]], taus)
+    shifts = fit_conformal(ensemble(val_qs), F["y_spread"][val_days], taus)
     q = apply_conformal(ensemble(qs), shifts)[0]
     da_hat = np.mean(das, 0)[0]
     bind = np.mean(binds, 0)[0]

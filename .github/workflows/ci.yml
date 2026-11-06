@@ -22,6 +22,7 @@ jobs:
       - name: Autopilot smoke run (simulated market, mechanics-only gates)
         env:
           GRIDALPHA_GATES: config/gates_ci.yaml
+          GRIDALPHA_NO_ISSUES: "1"   # a failing PR check is reported by CI itself, not as an issue
         run: python -m gridalpha.cli run --profile ci
       - uses: actions/setup-node@v4
         with:

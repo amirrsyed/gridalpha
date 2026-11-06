@@ -54,8 +54,11 @@ than a real market's, so treat simulated P&L as a pipeline test, not as evidence
 3. Add `ANTHROPIC_API_KEY` for the AI engineer, create the labels `autopilot` and `claude`,
    set `@OWNER` in `.github/CODEOWNERS` and protect `main` with code-owner review.
 4. Enable GitHub Pages (source: GitHub Actions).
-5. Run the `retrain` workflow once by hand. After that, `daily-signals` publishes tickets
-   every morning and `retrain` refreshes the models weekly.
+5. Run the `retrain` workflow by hand (Actions -> retrain -> Run workflow). For the first run,
+   set "Stop after this stage" to `features`: it downloads ERCOT history and builds features
+   without any GPU cost, and the download cache is saved even if the run stops early. Then run
+   it again from `pretrain` to train. `daily-signals` publishes tickets every morning once a
+   retrain has passed every gate; before that it exits early with a notice.
 
 Cost guardrails: every cloud job has a timeout, and the autopilot refuses to launch work
 that would push the month past `compute.monthly_budget_usd` (default $60).

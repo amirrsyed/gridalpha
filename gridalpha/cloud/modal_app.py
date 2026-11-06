@@ -31,7 +31,7 @@ volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 app = modal.App(APP_NAME, image=image)
 
 
-@app.function(gpu=_CFG["gpu"], volumes={"/vol": volume}, timeout=int(_CFG["timeout_min"]) * 60, retries=1)
+@app.function(gpu=_CFG["gpu"], memory=32768, volumes={"/vol": volume}, timeout=int(_CFG["timeout_min"]) * 60, retries=1)
 def run_job(kind: str, job: dict, overrides: list[str], profile: str | None) -> list[str]:
     from gridalpha.cloud.worker import run_jobs
     volume.reload()
