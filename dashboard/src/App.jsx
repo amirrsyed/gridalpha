@@ -101,6 +101,13 @@ export default function App({ data }) {
         </div>
       </section>
 
+      {m.shadow && (
+        <Callout intent="warning" icon="eye-open" title="Shadow tickets: paper trading only" style={{ marginBottom: 14 }}>
+          These tickets come from the trained models, but the backtest gate has not passed
+          ({(m.shadow_failed || []).map((c) => c.replaceAll("_", " ")).join(", ")}). They are published to be scored
+          against real prices, not to be traded. Sizes assume the configured bankroll; nothing is ever submitted.
+        </Callout>
+      )}
       {m.diagnostic?.length > 0 && (
         <Callout intent="danger" icon="warning-sign" title="Diagnostic run: not for trading" style={{ marginBottom: 14 }}>
           The autopilot's gates failed at {m.diagnostic.map((d) => `${d.stage} (${d.failed.join(", ").replaceAll("_", " ")})`).join(" and ")}.

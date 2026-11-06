@@ -35,7 +35,8 @@ model:
   layers: 3
   node_emb: 16
   adaptive_topk: 8
-  quantiles: [0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98]
+  # out to 0.5% / 99.5%: real-time spikes (about 0.7% of node-hours above $100) decide P&L and risk
+  quantiles: [0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.98, 0.99, 0.995]
   dropout: 0.1
   relations: [physical, adaptive, global]
 
@@ -75,7 +76,13 @@ calibrate:
   method: conformal_quantile_shift
 
 trade:
-  cost_per_mwh: 1.0         # fees + uplift, $/MWh
+  cost_per_mwh: 1.5         # $/MWh per cleared virtual: ERCOT and QSE fees plus slippage (assumed, conservative)
+  impact_per_mw: 0.10       # $/MWh our order moves the DA price per MW bid at one node-hour (assumed)
+  impact_hub_factor: 0.2    # hubs and load zones are far more liquid than single nodes
+  collateral_per_mwh: 75.0  # credit ERCOT holds per MWh of DAM energy bids/offers (assumed)
+  collateral_share: 1.0     # share of capital that may be posted as collateral on one day
+  edge_estimator: body      # trade direction and edge from the 5-95% body; tails only shrink or block positions
+  body_quantiles: [0.05, 0.95]
   min_edge: 2.0             # $/MWh above costs before a ticket is issued
   min_p_profit: 0.55
   capital: 250000.0         # $ bankroll for the backtest
@@ -88,6 +95,11 @@ trade:
   samples: 2000
   hour_corr_decay: 0.6
   max_tickets_per_day: 60
+
+publish:
+  # When only the backtest gate fails, still produce and publish tickets, labeled as shadow
+  # (paper-trading) tickets that are not validated for trading. Train and calibrate must pass.
+  shadow_if_backtest_fails: true
 
 compute:
   backend: local            # local | modal | digitalocean

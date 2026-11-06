@@ -31,9 +31,11 @@ def export_dashboard(ap) -> dict:
         "min_edge": cfg["trade"]["min_edge"], "min_p_profit": cfg["trade"]["min_p_profit"],
         "risk_per_mwh": cfg["trade"]["risk_per_mwh"], "max_mw_node_hour": cfg["trade"]["max_mw_node_hour"],
         "max_daily_var95": cfg["trade"]["max_daily_var95"], "ensemble_seeds": cfg["train"]["ensemble_seeds"],
+        "shadow": bool(ap.state["stages"].get("backtest", {}).get("shadow")),
+        "shadow_failed": (ap.state["stages"].get("backtest", {}).get("gate") or {}).get("failed", []),
         "diagnostic": [
             {"stage": s, "failed": (ap.state["stages"][s].get("gate") or {}).get("failed", [])}
-            for s, st in ap.state["stages"].items() if st.get("diagnostic_override")
+            for s, st in ap.state["stages"].items() if st.get("diagnostic_override") and not st.get("shadow")
         ],
     }, "grid": meta["grid"], "zones": meta["zones"]}
 

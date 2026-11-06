@@ -18,7 +18,7 @@ from ..train.calibrate import apply_conformal, ensemble, fit_conformal
 from ..train.train import build_model, device_of, predict, attributions
 from ..train.walk_forward import plan_folds
 from .kelly import node_correlation
-from .tickets import make_tickets, ptdf_from_meta, size_day
+from .tickets import impact_per_mwh, make_tickets, ptdf_from_meta, size_day
 
 KAPPAS = (1.0, 0.5, 0.25)
 THEMES = ["Data-center pocket", "Evening ramp", "Negative price", "Scarcity", "Other"]
@@ -45,16 +45,22 @@ def theme_of(n: int, h: int, da_act: float, rt_act: float, dc_near: set) -> str:
     return "Other"
 
 
-def settle(side: int, da: float, rt: float, limit: float, mw: float, cost: float) -> tuple[bool, float] | None:
+def settle(side: int, da: float, rt: float, limit: float, mw: float, cost: float,
+           impact: float = 0.0) -> tuple[bool, float] | None:
     """Clear and settle one virtual ticket; None if a realized price is missing.
+
+    impact: $/MWh our own order moves the day-ahead price against us (a DEC raises the DA price it
+    pays, an INC lowers the DA price it receives). The order clears only if that moved price is
+    still inside its limit.
 
     Real data has settlement gaps (missing DA or RT prints). Such tickets cannot be settled, so they
     are excluded from P&L instead of poisoning it with NaN.
     """
     if not (np.isfinite(da) and np.isfinite(rt)):
         return None
-    cleared = bool(da <= limit) if side > 0 else bool(da >= limit)
-    return cleared, ((side * (rt - da) - cost) * mw if cleared else 0.0)
+    da_eff = da + side * impact
+    cleared = bool(da_eff <= limit) if side > 0 else bool(da_eff >= limit)
+    return cleared, ((side * (rt - da_eff) - cost) * mw if cleared else 0.0)
 
 
 def _metrics(daily: np.ndarray, capital0: float, trades: list, compound: bool = False) -> dict:
@@ -84,6 +90,7 @@ def backtest_model(ap, name: str, live_day: int) -> dict:
     res = load_assembled(ap.A / "preds" / f"{name}_assembled")
     gnn = res if name == "gnn" else load_assembled(ap.A / "preds" / "gnn_assembled")
     zone_of = F["zone_of"]
+    names = [n["name"] for n in meta["grid"]["nodes"]]
     corr = [node_correlation(p) for p in res["pit_val"]]
     rng = np.random.default_rng(cfg["project"]["seed"])
     dc_near = _dc_neighborhood(meta)
@@ -98,7 +105,7 @@ def backtest_model(ap, name: str, live_day: int) -> dict:
             continue
         q = res["q_cal"][i]
         da_hat = gnn["da"][i]
-        sized = size_day(q, da_hat, None, cfg, corr[int(res["fold"][i])], zone_of, dict(cap), rng, KAPPAS)
+        sized = size_day(q, da_hat, None, cfg, corr[int(res["fold"][i])], zone_of, dict(cap), rng, KAPPAS, names)
         da_act, rt_act = F["y_da"][d], F["y_da"][d] + F["y_spread"][d]
         dates.append(str(F["dates"][d]))
         for k in KAPPAS:
@@ -110,7 +117,8 @@ def backtest_model(ap, name: str, live_day: int) -> dict:
                 need = tc["cost_per_mwh"] + tc["min_edge"]
                 limit = exp_rt - need if s > 0 else exp_rt + need
                 dA, rT = float(da_act[h, n]), float(rt_act[h, n])
-                settled = settle(s, dA, rT, limit, float(mw[j]), tc["cost_per_mwh"])
+                settled = settle(s, dA, rT, limit, float(mw[j]), tc["cost_per_mwh"],
+                                 impact_per_mwh(cfg, names[n], float(mw[j])))
                 if settled is None:
                     counts[k]["n_unsettled"] += 1
                     continue
@@ -207,14 +215,18 @@ def live_signals(ap) -> dict:
         bt = json.loads(bt_path.read_text())
         capital += float(np.sum(bt["daily"][str(k)]))
     rng = np.random.default_rng(cfg["project"]["seed"] + 1)
-    sized = size_day(q, da_hat, members_med, cfg, corr, F["zone_of"], capital, rng, (k,))
+    names = [nd["name"] for nd in meta["grid"]["nodes"]]
+    sized = size_day(q, da_hat, members_med, cfg, corr, F["zone_of"], capital, rng, (k,), names)
     date = str(F["dates"][day[0]])
     version = f"gnn-{date}-ens{len(cfg['train']['ensemble_seeds'])}-{cfg.get('_profile', 'default')}"
     tickets = make_tickets(date, sized, q, da_hat, bind, att[0], names, meta, cfg, k, version, ptdf_from_meta(meta),
                            members_med)
     out_dir = ap.A / "signals"
     out_dir.mkdir(exist_ok=True)
-    payload = {"operating_day": date, "diagnostic": any(st.get("diagnostic_override") for st in ap.state["stages"].values()), "capital": capital, "kelly_fraction": k, "model_version": version,
+    bst = ap.state["stages"].get("backtest", {})
+    payload = {"operating_day": date, "diagnostic": any(st.get("diagnostic_override") for st in ap.state["stages"].values()),
+               "shadow": bool(bst.get("shadow")) or bst.get("status") != "passed",
+               "shadow_failed": (bst.get("gate") or {}).get("failed", []), "capital": capital, "kelly_fraction": k, "model_version": version,
                "tickets": tickets,
                "grid_forecast": {"median_spread": np.round(q[..., mid], 2).tolist(),
                                  "q10": np.round(q[..., taus.index(0.1)], 2).tolist(),
