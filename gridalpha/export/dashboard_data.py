@@ -9,6 +9,7 @@ import numpy as np
 
 from ..train.calibrate import pit
 from .store import load_assembled
+from .. import jsonsafe
 
 TRADE_FIELDS = ["date", "he", "n", "side", "mw", "limit", "exp_da", "exp_rt", "q", "edge", "pp", "kf", "ks",
                 "cleared", "da", "rt", "pnl", "theme"]
@@ -120,7 +121,7 @@ def export_dashboard(ap) -> dict:
     site = A / "site"
     site.mkdir(exist_ok=True)
     path = site / "signals.json"
-    path.write_text(json.dumps(out, separators=(",", ":"), default=float))
+    path.write_text(jsonsafe.dumps(out, separators=(",", ":"), default=float))
     dash = ap.root / "dashboard" / "public"
     if dash.parent.exists():
         dash.mkdir(exist_ok=True)

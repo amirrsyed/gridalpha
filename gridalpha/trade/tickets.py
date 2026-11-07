@@ -186,7 +186,8 @@ def make_tickets(day: str, sized: dict, q: np.ndarray, da_hat: np.ndarray, bind:
             "constraint": line_name(meta, top_l), "constraint_exposure": round(float(expo[top_l]), 3),
             "drivers": drivers,
             "ens_disagreement": round(float(members_med[h, n].std()), 2) if members_med is not None else None,
-            "growth_curve": [[round(float(f), 4), round(float(g), 6)] for f, g in zip(curve_f, growth(curve_f, X, tc["risk_per_mwh"]))],
+            "growth_curve": [[round(float(f), 4), round(float(g), 6)] for f, g in zip(curve_f, growth(curve_f, X, tc["risk_per_mwh"]))
+                             if np.isfinite(g)],   # past ruin the growth is -inf: not plottable, not valid JSON
             "valid_until": f"{day} -1d 10:00 CT",
             "model_version": model_version,
         })
