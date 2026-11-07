@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://amirsyed.xyz/gridalpha/"><img src="docs/banner.png" width="851" alt="GridAlpha: daily, open-source, systematic power trading ideas from a GNN on the ERCOT grid"></a>
+</p>
+
+<p align="center"><a href="https://amirsyed.xyz/gridalpha/"><b>Live dashboard</b></a> · paper-trading research, not investment advice</p>
+
 # GridAlpha
 
 A physics-informed graph neural network that forecasts where the power grid will congest
